@@ -1,0 +1,3 @@
+CREATE DATABASE nakvaksin;
+CREATE USER nakvaksin WITH ENCRYPTED PASSWORD 'nakvaksin';
+GRANT ALL PRIVILEGES ON DATABASE nakvaksin TO nakvaksin;
