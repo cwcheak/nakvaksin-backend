@@ -37,6 +37,15 @@ public class NotificationMessageGenerator {
     @Location("appointment_updated_1st_dose_family_v1")
     Template firstDoseAppointmentUpdatedFamilyTemplate;
 
+    @Location("appointment_reminder_1st_dose_self_v1")
+    Template firstDoseAppointmentReminderSelfTemplate;
+
+    @Location("appointment_reminder_1st_dose_family_v1")
+    Template firstDoseAppointmentReminderFamilyTemplate;
+
+    @Location("1st_dose_completed_v1")
+    Template firstDoseCompletedTemplate;
+
     @Location("appointment_2nd_dose_self_v1")
     Template secondDoseAppointmentSelfTemplate;
 
@@ -48,6 +57,15 @@ public class NotificationMessageGenerator {
 
     @Location("appointment_updated_2nd_dose_family_v1")
     Template secondDoseAppointmentUpdatedFamilyTemplate;
+
+    @Location("appointment_reminder_2nd_dose_self_v1")
+    Template secondDoseAppointmentReminderSelfTemplate;
+
+    @Location("appointment_reminder_2nd_dose_family_v1")
+    Template secondDoseAppointmentReminderFamilyTemplate;
+
+    @Location("2nd_dose_completed_v1")
+    Template secondDoseCompletedTemplate;
 
     @Inject
     UnsubService unsubService;
@@ -158,6 +176,81 @@ public class NotificationMessageGenerator {
         return ntf;
     }
 
+    public Notification constructFirstDoseAppointmentPriorDayReminderMessage(String name, Subscription subscription, StageElement element, String prevJson, String currJson) {
+        log.debug("constructFirstDoseAppointmentPriorDayReminderMessage...");
+
+        Notification ntf = new Notification();
+        List<NotificationChannelStatus> list = new ArrayList<>();
+        if (StringUtils.isNotBlank(subscription.getUserPhoneNumber())) {
+            String userSmsText = "NakVaksin: Your 1st dose vaccination appointment is tomorrow. Please make plans to attend.";
+            list.add(new NotificationChannelStatus(NotificationChannelStatus.CHANNEL_TYPE_SMS, userSmsText, subscription.getUserPhoneNumber(), null));
+        }
+        if (StringUtils.isNotBlank(subscription.getFamilyPhoneNumber())) {
+            String familySmsText = "NakVaksin: 1st dose vaccination appointment for " + sanitizeName(name) + " is tomorrow. Please remind him/her to attend.";
+            list.add(new NotificationChannelStatus(NotificationChannelStatus.CHANNEL_TYPE_SMS, familySmsText, subscription.getFamilyPhoneNumber(), null));
+        }
+        if (StringUtils.isNotBlank(subscription.getUserEmail())) {
+            String unsubKey = getUnsubKey(subscription.getUserEmail());
+
+            String userEmailHTML = firstDoseAppointmentReminderSelfTemplate
+                .data("elements", element.getData())
+                .data("unsubKey", unsubKey)
+                .render();
+
+            list.add(new NotificationChannelStatus(NotificationChannelStatus.CHANNEL_TYPE_EMAIL, userEmailHTML, subscription.getUserEmail(), null));
+        }
+        if (StringUtils.isNotBlank(subscription.getFamilyEmail())) {
+            String unsubKey = getUnsubKey(subscription.getFamilyEmail());
+
+            String familyEmailHTML = firstDoseAppointmentReminderFamilyTemplate
+                .data("elements", element.getData())
+                .data("name", name)
+                .data("unsubKey", unsubKey)
+                .render();
+            log.debug("familyEmailHTML : {}", familyEmailHTML);
+
+            list.add(new NotificationChannelStatus(NotificationChannelStatus.CHANNEL_TYPE_EMAIL, familyEmailHTML, subscription.getFamilyEmail(), null));
+        }
+        ntf.setChannels(list);
+        ntf.setUserId(subscription.getUserId());
+        ntf.setAllSent(false);
+        ntf.setCurrVacStatusJson(currJson);
+        ntf.setPrevVacStatusJson(prevJson);
+        ntf.setCreatedDate(new Date());
+
+        return ntf;
+    }
+
+    public Notification constructFirstDoseCompletedMessage(String name, Subscription subscription, String prevJson, String currJson) {
+        log.debug("constructFirstDoseAppointmentCompletedMessage...");
+
+        Notification ntf = new Notification();
+        List<NotificationChannelStatus> list = new ArrayList<>();
+        if (StringUtils.isNotBlank(subscription.getFamilyPhoneNumber())) {
+            String familySmsText = "NakVaksin: This is to notify you that 1st dose vaccination for " + sanitizeName(name) + " has completed.";
+            list.add(new NotificationChannelStatus(NotificationChannelStatus.CHANNEL_TYPE_SMS, familySmsText, subscription.getFamilyPhoneNumber(), null));
+        }
+        if (StringUtils.isNotBlank(subscription.getFamilyEmail())) {
+            String unsubKey = getUnsubKey(subscription.getFamilyEmail());
+
+            String familyEmailHTML = firstDoseCompletedTemplate
+                .data("name", name)
+                .data("unsubKey", unsubKey)
+                .render();
+            log.debug("familyEmailHTML : {}", familyEmailHTML);
+
+            list.add(new NotificationChannelStatus(NotificationChannelStatus.CHANNEL_TYPE_EMAIL, familyEmailHTML, subscription.getFamilyEmail(), null));
+        }
+        ntf.setChannels(list);
+        ntf.setUserId(subscription.getUserId());
+        ntf.setAllSent(false);
+        ntf.setCurrVacStatusJson(currJson);
+        ntf.setPrevVacStatusJson(prevJson);
+        ntf.setCreatedDate(new Date());
+
+        return ntf;
+    }
+
     public Notification constructSecondDoseAppointmentScheduledMessage(String name, Subscription subscription, StageElement element, String prevJson, String currJson) {
         log.debug("constructSecondDoseAppointmentScheduledMessage...");
 
@@ -245,6 +338,81 @@ public class NotificationMessageGenerator {
 
             String familyEmailHTML = secondDoseAppointmentUpdatedFamilyTemplate
                 .data("elements", element.getData())
+                .data("name", name)
+                .data("unsubKey", unsubKey)
+                .render();
+            log.debug("familyEmailHTML : {}", familyEmailHTML);
+
+            list.add(new NotificationChannelStatus(NotificationChannelStatus.CHANNEL_TYPE_EMAIL, familyEmailHTML, subscription.getFamilyEmail(), null));
+        }
+        ntf.setChannels(list);
+        ntf.setUserId(subscription.getUserId());
+        ntf.setAllSent(false);
+        ntf.setCurrVacStatusJson(currJson);
+        ntf.setPrevVacStatusJson(prevJson);
+        ntf.setCreatedDate(new Date());
+
+        return ntf;
+    }
+
+    public Notification constructSecondDoseAppointmentPriorDayReminderMessage(String name, Subscription subscription, StageElement element, String prevJson, String currJson) {
+        log.debug("constructSecondDoseAppointmentPriorDayReminderMessage...");
+
+        Notification ntf = new Notification();
+        List<NotificationChannelStatus> list = new ArrayList<>();
+        if (StringUtils.isNotBlank(subscription.getUserPhoneNumber())) {
+            String userSmsText = "NakVaksin: Your 2nd dose vaccination appointment is tomorrow. Please make plans to attend.";
+            list.add(new NotificationChannelStatus(NotificationChannelStatus.CHANNEL_TYPE_SMS, userSmsText, subscription.getUserPhoneNumber(), null));
+        }
+        if (StringUtils.isNotBlank(subscription.getFamilyPhoneNumber())) {
+            String familySmsText = "NakVaksin: 2nd dose vaccination appointment for " + sanitizeName(name) + " is tomorrow. Please remind him/her to attend.";
+            list.add(new NotificationChannelStatus(NotificationChannelStatus.CHANNEL_TYPE_SMS, familySmsText, subscription.getFamilyPhoneNumber(), null));
+        }
+        if (StringUtils.isNotBlank(subscription.getUserEmail())) {
+            String unsubKey = getUnsubKey(subscription.getUserEmail());
+
+            String userEmailHTML = secondDoseAppointmentReminderSelfTemplate
+                .data("elements", element.getData())
+                .data("unsubKey", unsubKey)
+                .render();
+
+            list.add(new NotificationChannelStatus(NotificationChannelStatus.CHANNEL_TYPE_EMAIL, userEmailHTML, subscription.getUserEmail(), null));
+        }
+        if (StringUtils.isNotBlank(subscription.getFamilyEmail())) {
+            String unsubKey = getUnsubKey(subscription.getFamilyEmail());
+
+            String familyEmailHTML = secondDoseAppointmentReminderFamilyTemplate
+                .data("elements", element.getData())
+                .data("name", name)
+                .data("unsubKey", unsubKey)
+                .render();
+            log.debug("familyEmailHTML : {}", familyEmailHTML);
+
+            list.add(new NotificationChannelStatus(NotificationChannelStatus.CHANNEL_TYPE_EMAIL, familyEmailHTML, subscription.getFamilyEmail(), null));
+        }
+        ntf.setChannels(list);
+        ntf.setUserId(subscription.getUserId());
+        ntf.setAllSent(false);
+        ntf.setCurrVacStatusJson(currJson);
+        ntf.setPrevVacStatusJson(prevJson);
+        ntf.setCreatedDate(new Date());
+
+        return ntf;
+    }
+
+    public Notification constructSecondDoseCompletedMessage(String name, Subscription subscription, String prevJson, String currJson) {
+        log.debug("constructSecondDoseCompletedMessage...");
+
+        Notification ntf = new Notification();
+        List<NotificationChannelStatus> list = new ArrayList<>();
+        if (StringUtils.isNotBlank(subscription.getFamilyPhoneNumber())) {
+            String familySmsText = "NakVaksin: This is to notify you that 2nd dose vaccination for " + sanitizeName(name) + " has completed.";
+            list.add(new NotificationChannelStatus(NotificationChannelStatus.CHANNEL_TYPE_SMS, familySmsText, subscription.getFamilyPhoneNumber(), null));
+        }
+        if (StringUtils.isNotBlank(subscription.getFamilyEmail())) {
+            String unsubKey = getUnsubKey(subscription.getFamilyEmail());
+
+            String familyEmailHTML = secondDoseCompletedTemplate
                 .data("name", name)
                 .data("unsubKey", unsubKey)
                 .render();

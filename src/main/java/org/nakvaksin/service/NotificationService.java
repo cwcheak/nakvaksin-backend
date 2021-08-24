@@ -118,7 +118,7 @@ public class NotificationService {
 
                 notificationRepository.updateNotification(notification);
             }
-        } catch (ExecutionException | InterruptedException e) {
+        } catch (Exception e) {
             e.printStackTrace();
             log.error("Error when sending notification : {}", e.getMessage());
         }

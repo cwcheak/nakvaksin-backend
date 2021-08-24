@@ -54,7 +54,6 @@ public class SubscriptionRepository {
         if (doc.exists()) {
             log.debug("Subscription exists. Updating...");
             ApiFuture<Void> futureTransaction = firestore.runTransaction(transaction -> {
-                DocumentSnapshot snapshot = transaction.get(docRef).get();
                 transaction.update(docRef, "userPhoneNumber", subscription.getUserPhoneNumber());
                 transaction.update(docRef, "userEmail", subscription.getUserEmail());
                 transaction.update(docRef, "familyPhoneNumber", subscription.getFamilyPhoneNumber());

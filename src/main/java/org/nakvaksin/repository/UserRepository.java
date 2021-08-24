@@ -71,8 +71,6 @@ public class UserRepository {
         log.debug("createOrUpdateUserProfile : {}", user);
 
         CollectionReference users = firestore.collection("users");
-        log.debug("Users collection : {}", users);
-
         DocumentReference docRef = users.document(user.getUserId());
         ApiFuture<DocumentSnapshot> future = docRef.get();
         DocumentSnapshot doc = future.get();

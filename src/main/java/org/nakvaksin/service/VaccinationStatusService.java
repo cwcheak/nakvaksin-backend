@@ -14,14 +14,21 @@ import org.slf4j.LoggerFactory;
 
 import javax.enterprise.context.ApplicationScoped;
 import javax.inject.Inject;
-import java.util.*;
+import java.time.LocalDate;
+import java.time.format.DateTimeFormatter;
+import java.util.Date;
+import java.util.List;
+import java.util.Optional;
 import java.util.concurrent.ExecutionException;
 
 @ApplicationScoped
 public class VaccinationStatusService {
     private final Logger log = LoggerFactory.getLogger(VaccinationStatusService.class);
     private final String TEXT_FIRST_DOSE_APPOINTMENT = "1st Dose appointment";
+    private final String TEXT_FIRST_DOSE_COMPLETED = "1st Dose completed";
     private final String TEXT_SECOND_DOSE_APPOINTMENT = "2nd Dose appointment";
+    private final String TEXT_SECOND_DOSE_COMPLETED = "2nd Dose completed";
+    private final String TEXT_APPOINTMENT_DATE = "Date:";
 
     @Inject
     VaccinationStatusRepository vaccinationStatusRepository;
@@ -37,6 +44,9 @@ public class VaccinationStatusService {
 
     @Inject
     NotificationMessageGenerator notificationMessageGenerator;
+
+    @Inject
+    WorkflowStageService workflowStageService;
 
     @Inject
     EventBus eventBus;
@@ -68,53 +78,182 @@ public class VaccinationStatusService {
             if (StringUtils.isBlank(status.getVacPreviousJson()))
                 return;
 
+            // Check if user subscribe to be notified
             Optional<Subscription> subOpt = subscriptionService.getByUserId(status.getUserId());
             if (!subOpt.isPresent())
                 return;
             Subscription subscription = subOpt.get();
 
-            User user = userService.getUserByUserId(status.getUserId());
-
             StageElement[] prevNodeStageElements = mapper.readValue(status.getVacPreviousJson(), StageElement[].class);
             StageElement[] currNodeStageElements = mapper.readValue(status.getVacCurrentJson(), StageElement[].class);
 
-            // Check 1st dose appointment for new schedule or updates
             StageElement prevFirstDoseEl = findStage(prevNodeStageElements, TEXT_FIRST_DOSE_APPOINTMENT);
             StageElement currFirstDoseEl = findStage(currNodeStageElements, TEXT_FIRST_DOSE_APPOINTMENT);
+            StageElement prevSecondDoseEl = findStage(prevNodeStageElements, TEXT_SECOND_DOSE_APPOINTMENT);
+            StageElement currSecondDoseEl = findStage(currNodeStageElements, TEXT_SECOND_DOSE_APPOINTMENT);
+            StageElement prevFirstDoseCompletedEl = findStage(prevNodeStageElements, TEXT_FIRST_DOSE_COMPLETED);
+            StageElement currFirstDoseCompletedEl = findStage(currNodeStageElements, TEXT_FIRST_DOSE_COMPLETED);
+            StageElement prevSecondDoseCompletedEl = findStage(prevNodeStageElements, TEXT_SECOND_DOSE_COMPLETED);
+            StageElement currSecondDoseCompletedEl = findStage(currNodeStageElements, TEXT_SECOND_DOSE_COMPLETED);
 
-            if (prevFirstDoseEl != null && currFirstDoseEl != null) {
+            // Check user workflow stage
+            WorkflowStage wfStage = workflowStageService.getByUserId(status.getUserId());
+            if (wfStage == null) {
+                wfStage = initializeWorkflowStage(status.getUserId(), currFirstDoseEl, currSecondDoseEl);
+                workflowStageService.createOrUpdateWorkflowStage(wfStage);
+            }
+
+            User user = userService.getUserByUserId(status.getUserId());
+
+            // If 1st dose has not complete
+            if (wfStage.getCurrStage() < WorkflowStage.STAGE_FIRST_DOSE_COMPLETED && prevFirstDoseEl != null && currFirstDoseEl != null) {
+                // Check 1st dose appointment for new schedule or updates
                 if (!prevFirstDoseEl.getState().equalsIgnoreCase(currFirstDoseEl.getState()) && "ACTIVE".equalsIgnoreCase(currFirstDoseEl.getState())) {
                     log.debug("1st dose appointment SCHEDULED");
+
+                    // Create and save notification
                     Notification ntf = notificationMessageGenerator.constructFirstDoseAppointmentMessage(user.getDisplayName(), subscription, currFirstDoseEl, status.getVacPreviousJson(), status.getVacCurrentJson());
                     notificationService.saveNotification(ntf);
+
+                    // Update workflow stage
+                    wfStage.setUserId(user.getUserId());
+                    wfStage.setCurrStage(WorkflowStage.STAGE_FIRST_DOSE_APPOINTMENT_SCHEDULED);
+                    wfStage.setStageHist(wfStage.getStageHist() + "->" + WorkflowStage.STAGE_FIRST_DOSE_APPOINTMENT_SCHEDULED);
+                    workflowStageService.createOrUpdateWorkflowStage(wfStage);
+
                 } else if ("ACTIVE".equalsIgnoreCase(prevFirstDoseEl.getState())
                     && "ACTIVE".equalsIgnoreCase(currFirstDoseEl.getState())
                     && isAppointmentChanged(prevFirstDoseEl.getData(), currFirstDoseEl.getData())) {
-
                     log.debug("1st dose appointment CHANGED");
+
+                    // Create and save notification
                     Notification ntf = notificationMessageGenerator.constructFirstDoseAppointmentChangedMessage(user.getDisplayName(), subscription, currFirstDoseEl, status.getVacPreviousJson(), status.getVacCurrentJson());
                     notificationService.saveNotification(ntf);
+
+                    // Update workflow stage
+                    wfStage.setUserId(user.getUserId());
+                    wfStage.setCurrStage(WorkflowStage.STAGE_FIRST_DOSE_APPOINTMENT_SCHEDULED);
+                    wfStage.setStageHist(wfStage.getStageHist() + "->" + WorkflowStage.STAGE_FIRST_DOSE_APPOINTMENT_SCHEDULED);
+                    workflowStageService.createOrUpdateWorkflowStage(wfStage);
+
+                }
+
+                // Check if 1st dose appointment is tomorrow
+                DataElement el = findElement(currFirstDoseEl.getData(), TEXT_APPOINTMENT_DATE);
+                String appointmentDate = null;
+                if (el != null)
+                    appointmentDate = el.getValue();
+
+                if ("ACTIVE".equalsIgnoreCase(prevFirstDoseEl.getState())
+                    && "ACTIVE".equalsIgnoreCase(currFirstDoseEl.getState())
+                    && el != null
+                    && isAppointmentTomorrow(appointmentDate)) {
+                    log.debug("1st dose appointment is tomorrow, send reminder...");
+
+                    // Create and save notification
+                    Notification ntf = notificationMessageGenerator.constructFirstDoseAppointmentPriorDayReminderMessage(user.getDisplayName(), subscription, currFirstDoseEl, status.getVacPreviousJson(), status.getVacCurrentJson());
+                    notificationService.saveNotification(ntf);
+
+                    // Update workflow stage
+                    wfStage.setUserId(user.getUserId());
+                    wfStage.setCurrStage(WorkflowStage.STAGE_FIRST_DOSE_APPOINTMENT_PRIOR_DAY_REMINDER);
+                    wfStage.setStageHist(wfStage.getStageHist() + "->" + WorkflowStage.STAGE_FIRST_DOSE_APPOINTMENT_PRIOR_DAY_REMINDER);
+                    workflowStageService.createOrUpdateWorkflowStage(wfStage);
                 }
             }
 
-            // Check 2nd dose appointment for new schedule or updates
-            StageElement prevSecondDoseEl = findStage(prevNodeStageElements, TEXT_SECOND_DOSE_APPOINTMENT);
-            StageElement currSecondDoseEl = findStage(currNodeStageElements, TEXT_SECOND_DOSE_APPOINTMENT);
+            // Check if 1st dose completed
+            if (wfStage.getCurrStage() < WorkflowStage.STAGE_FIRST_DOSE_COMPLETED && prevFirstDoseCompletedEl != null && currFirstDoseCompletedEl != null
+                && !"COMPLETED".equalsIgnoreCase(prevFirstDoseCompletedEl.getState())
+                && "COMPLETED".equalsIgnoreCase(currFirstDoseCompletedEl.getState())) {
+                log.debug("1st dose completed");
 
-            if (prevSecondDoseEl != null && currSecondDoseEl != null) {
+                // Create and save notification
+                Notification ntf = notificationMessageGenerator.constructFirstDoseCompletedMessage(user.getDisplayName(), subscription, status.getVacPreviousJson(), status.getVacCurrentJson());
+                notificationService.saveNotification(ntf);
+
+                // Update workflow stage
+                wfStage.setUserId(user.getUserId());
+                wfStage.setCurrStage(WorkflowStage.STAGE_FIRST_DOSE_COMPLETED);
+                wfStage.setStageHist(wfStage.getStageHist() + "->" + WorkflowStage.STAGE_FIRST_DOSE_COMPLETED);
+                workflowStageService.createOrUpdateWorkflowStage(wfStage);
+            }
+
+
+            // If 2nd dose has not complete
+            if (wfStage.getCurrStage() < WorkflowStage.STAGE_SECOND_DOSE_COMPLETED && prevSecondDoseEl != null && currSecondDoseEl != null) {
+                // Check 2nd dose appointment for new schedule or updates
                 if (!prevSecondDoseEl.getState().equalsIgnoreCase(currSecondDoseEl.getState()) && "ACTIVE".equalsIgnoreCase(currSecondDoseEl.getState())) {
                     log.debug("2nd dose appointment SCHEDULED");
+
+                    // Create and save notification
                     Notification ntf = notificationMessageGenerator.constructSecondDoseAppointmentScheduledMessage(user.getDisplayName(), subscription, currSecondDoseEl, status.getVacPreviousJson(), status.getVacCurrentJson());
                     notificationService.saveNotification(ntf);
+
+                    // Update workflow stage
+                    wfStage.setUserId(user.getUserId());
+                    wfStage.setCurrStage(WorkflowStage.STAGE_SECOND_DOSE_APPOINTMENT_SCHEDULED);
+                    wfStage.setStageHist(wfStage.getStageHist() + "->" + WorkflowStage.STAGE_SECOND_DOSE_APPOINTMENT_SCHEDULED);
+                    workflowStageService.createOrUpdateWorkflowStage(wfStage);
+
                 } else if ("ACTIVE".equalsIgnoreCase(prevSecondDoseEl.getState())
                     && "ACTIVE".equalsIgnoreCase(currSecondDoseEl.getState())
                     && isAppointmentChanged(prevSecondDoseEl.getData(), currSecondDoseEl.getData())) {
-
                     log.debug("2nd dose appointment CHANGED");
+
+                    // Create and save notification
                     Notification ntf = notificationMessageGenerator.constructSecondDoseAppointmentChangedMessage(user.getDisplayName(), subscription, currSecondDoseEl, status.getVacPreviousJson(), status.getVacCurrentJson());
                     notificationService.saveNotification(ntf);
+
+                    // Update workflow stage
+                    wfStage.setUserId(user.getUserId());
+                    wfStage.setCurrStage(WorkflowStage.STAGE_SECOND_DOSE_APPOINTMENT_SCHEDULED);
+                    wfStage.setStageHist(wfStage.getStageHist() + "->" + WorkflowStage.STAGE_SECOND_DOSE_APPOINTMENT_SCHEDULED);
+                    workflowStageService.createOrUpdateWorkflowStage(wfStage);
+
+                }
+
+                // Check if 2nd dose appointment is tomorrow
+                DataElement el = findElement(currSecondDoseEl.getData(), TEXT_APPOINTMENT_DATE);
+                String appointmentDate = null;
+                if (el != null)
+                    appointmentDate = el.getValue();
+
+                if ("ACTIVE".equalsIgnoreCase(prevSecondDoseEl.getState())
+                    && "ACTIVE".equalsIgnoreCase(currSecondDoseEl.getState())
+                    && el != null
+                    && isAppointmentTomorrow(appointmentDate)) {
+                    log.debug("2nd dose appointment is tomorrow, send reminder...");
+
+                    // Create and save notification
+                    Notification ntf = notificationMessageGenerator.constructSecondDoseAppointmentPriorDayReminderMessage(user.getDisplayName(), subscription, currFirstDoseEl, status.getVacPreviousJson(), status.getVacCurrentJson());
+                    notificationService.saveNotification(ntf);
+
+                    // Update workflow stage
+                    wfStage.setUserId(user.getUserId());
+                    wfStage.setCurrStage(WorkflowStage.STAGE_SECOND_DOSE_APPOINTMENT_PRIOR_DAY_REMINDER);
+                    wfStage.setStageHist(wfStage.getStageHist() + "->" + WorkflowStage.STAGE_SECOND_DOSE_APPOINTMENT_PRIOR_DAY_REMINDER);
+                    workflowStageService.createOrUpdateWorkflowStage(wfStage);
                 }
             }
+
+            // Check if 2nd dose completed
+            if (wfStage.getCurrStage() < WorkflowStage.STAGE_SECOND_DOSE_COMPLETED && prevSecondDoseCompletedEl != null && currSecondDoseCompletedEl != null
+                && !"COMPLETED".equalsIgnoreCase(prevSecondDoseCompletedEl.getState())
+                && "COMPLETED".equalsIgnoreCase(currSecondDoseCompletedEl.getState())) {
+                log.debug("2nd dose completed");
+
+                // Create and save notification
+                Notification ntf = notificationMessageGenerator.constructSecondDoseCompletedMessage(user.getDisplayName(), subscription, status.getVacPreviousJson(), status.getVacCurrentJson());
+                notificationService.saveNotification(ntf);
+
+                // Update workflow stage
+                wfStage.setUserId(user.getUserId());
+                wfStage.setCurrStage(WorkflowStage.STAGE_SECOND_DOSE_COMPLETED);
+                wfStage.setStageHist(wfStage.getStageHist() + "->" + WorkflowStage.STAGE_SECOND_DOSE_COMPLETED);
+                workflowStageService.createOrUpdateWorkflowStage(wfStage);
+            }
+
         } catch (Exception e) {
             e.printStackTrace();
             log.error("Error when comparing vac status: {}", e.getMessage());
@@ -152,5 +291,32 @@ public class VaccinationStatusService {
         }
 
         return false;
+    }
+
+    private boolean isAppointmentTomorrow(String appointmentDateStr) {
+        DateTimeFormatter formatter = DateTimeFormatter.ofPattern("dd-MM-yyyy");
+        LocalDate appointmentDate = LocalDate.parse(appointmentDateStr, formatter);
+        LocalDate tomorrow = LocalDate.now().plusDays(1);
+        return appointmentDate.equals(tomorrow);
+    }
+
+    private WorkflowStage initializeWorkflowStage(String userId, StageElement currFirstDoseEl, StageElement currSecondDoseEl) {
+        WorkflowStage stage = new WorkflowStage();
+        stage.setUserId(userId);
+        if ("COMPLETED".equalsIgnoreCase(currSecondDoseEl.getState())) {
+            stage.setCurrStage(WorkflowStage.STAGE_SECOND_DOSE_COMPLETED);
+        } else if ("ACTIVE".equalsIgnoreCase(currSecondDoseEl.getState())) {
+            stage.setCurrStage(WorkflowStage.STAGE_SECOND_DOSE_APPOINTMENT_SCHEDULED);
+        } else if ("COMPLETED".equalsIgnoreCase(currFirstDoseEl.getState())) {
+            stage.setCurrStage(WorkflowStage.STAGE_FIRST_DOSE_COMPLETED);
+        } else if ("ACTIVE".equalsIgnoreCase(currFirstDoseEl.getState())) {
+            stage.setCurrStage(WorkflowStage.STAGE_FIRST_DOSE_APPOINTMENT_SCHEDULED);
+        } else {
+            stage.setCurrStage(WorkflowStage.STAGE_INIT);
+        }
+        stage.setStageHist("");
+        stage.setLastModifiedDate(new Date());
+
+        return stage;
     }
 }
