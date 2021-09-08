@@ -15,6 +15,8 @@ import org.slf4j.LoggerFactory;
 import javax.enterprise.context.ApplicationScoped;
 import javax.inject.Inject;
 import java.time.LocalDate;
+import java.time.ZoneId;
+import java.time.ZonedDateTime;
 import java.time.format.DateTimeFormatter;
 import java.util.Date;
 import java.util.List;
@@ -108,7 +110,9 @@ public class VaccinationStatusService {
             // If 1st dose has not complete
             if (wfStage.getCurrStage() < WorkflowStage.STAGE_FIRST_DOSE_COMPLETED && prevFirstDoseEl != null && currFirstDoseEl != null) {
                 // Check 1st dose appointment for new schedule or updates
-                if (!prevFirstDoseEl.getState().equalsIgnoreCase(currFirstDoseEl.getState()) && "ACTIVE".equalsIgnoreCase(currFirstDoseEl.getState())) {
+                if (wfStage.getCurrStage() < WorkflowStage.STAGE_FIRST_DOSE_APPOINTMENT_SCHEDULED
+                    && !prevFirstDoseEl.getState().equalsIgnoreCase(currFirstDoseEl.getState())
+                    && "ACTIVE".equalsIgnoreCase(currFirstDoseEl.getState())) {
                     log.debug("1st dose appointment SCHEDULED");
 
                     // Create and save notification
@@ -144,7 +148,8 @@ public class VaccinationStatusService {
                 if (el != null)
                     appointmentDate = el.getValue();
 
-                if ("ACTIVE".equalsIgnoreCase(prevFirstDoseEl.getState())
+                if (wfStage.getCurrStage() < WorkflowStage.STAGE_FIRST_DOSE_APPOINTMENT_PRIOR_DAY_REMINDER
+                    && "ACTIVE".equalsIgnoreCase(prevFirstDoseEl.getState())
                     && "ACTIVE".equalsIgnoreCase(currFirstDoseEl.getState())
                     && el != null
                     && isAppointmentTomorrow(appointmentDate)) {
@@ -183,7 +188,8 @@ public class VaccinationStatusService {
             // If 2nd dose has not complete
             if (wfStage.getCurrStage() < WorkflowStage.STAGE_SECOND_DOSE_COMPLETED && prevSecondDoseEl != null && currSecondDoseEl != null) {
                 // Check 2nd dose appointment for new schedule or updates
-                if (!prevSecondDoseEl.getState().equalsIgnoreCase(currSecondDoseEl.getState()) && "ACTIVE".equalsIgnoreCase(currSecondDoseEl.getState())) {
+                if (wfStage.getCurrStage() < WorkflowStage.STAGE_SECOND_DOSE_APPOINTMENT_SCHEDULED &&
+                    !prevSecondDoseEl.getState().equalsIgnoreCase(currSecondDoseEl.getState()) && "ACTIVE".equalsIgnoreCase(currSecondDoseEl.getState())) {
                     log.debug("2nd dose appointment SCHEDULED");
 
                     // Create and save notification
@@ -219,7 +225,8 @@ public class VaccinationStatusService {
                 if (el != null)
                     appointmentDate = el.getValue();
 
-                if ("ACTIVE".equalsIgnoreCase(prevSecondDoseEl.getState())
+                if (wfStage.getCurrStage() < WorkflowStage.STAGE_SECOND_DOSE_APPOINTMENT_PRIOR_DAY_REMINDER
+                    && "ACTIVE".equalsIgnoreCase(prevSecondDoseEl.getState())
                     && "ACTIVE".equalsIgnoreCase(currSecondDoseEl.getState())
                     && el != null
                     && isAppointmentTomorrow(appointmentDate)) {
@@ -295,9 +302,14 @@ public class VaccinationStatusService {
 
     private boolean isAppointmentTomorrow(String appointmentDateStr) {
         DateTimeFormatter formatter = DateTimeFormatter.ofPattern("dd-MM-yyyy");
-        LocalDate appointmentDate = LocalDate.parse(appointmentDateStr, formatter);
-        LocalDate tomorrow = LocalDate.now().plusDays(1);
-        return appointmentDate.equals(tomorrow);
+        LocalDate appointmentLocalDate = LocalDate.parse(appointmentDateStr, formatter);
+        System.out.println("appointmentLocalDate : " + appointmentLocalDate);
+
+        ZonedDateTime tomorrow = ZonedDateTime.now().withZoneSameInstant(ZoneId.of("Asia/Kuala_Lumpur")).plusDays(1);
+        LocalDate tomorrowLocalDate = tomorrow.toLocalDate();
+        System.out.println("tomorrowLocalDate : " + tomorrowLocalDate);
+
+        return appointmentLocalDate.equals(tomorrowLocalDate);
     }
 
     private WorkflowStage initializeWorkflowStage(String userId, StageElement currFirstDoseEl, StageElement currSecondDoseEl) {
